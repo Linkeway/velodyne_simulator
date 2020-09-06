@@ -138,6 +138,9 @@ namespace gazebo
     private: void laserQueueThread();
     private: boost::thread callback_laser_queue_thread_;
 
+    // custom laser pitch angles instead of interpolated ones
+    private: std::vector<double> custom_pitch_angles_;
+
     // Subscribe to gazebo laserscan
     private: gazebo::transport::NodePtr gazebo_node_;
     private: gazebo::transport::SubscriberPtr sub_;

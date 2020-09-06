@@ -198,6 +198,54 @@ void GazeboRosVelodyneLaser::Load(sensors::SensorPtr _parent, sdf::ElementPtr _s
 #else
   ROS_INFO("Velodyne %slaser plugin ready, %i lasers", STR_GPU_, parent_ray_sensor_->GetVerticalRangeCount());
 #endif
+
+#if GAZEBO_GPU_RAY
+#else
+  // currently not supported with GPU Ray
+  if ( _sdf->HasElement("angles")) // custom Ray pitch angles
+  {
+    auto angles_str = _sdf->Get<std::string>("angles");
+    std::istringstream iss(angles_str);
+    double val;
+    while (iss >> val) {
+      custom_pitch_angles_.push_back(val*M_PI/ 180.0);
+    }
+
+    auto laser_shape = this->parent_ray_sensor_->LaserShape();
+    unsigned int ray_index = 0;
+    for (unsigned int j = 0; j < custom_pitch_angles_.size(); ++j)
+    {
+      auto horz_samples = laser_shape->GetSampleCount();
+      for (unsigned int i = 0; i < horz_samples; ++i)
+      {
+        double yaw_range = laser_shape->MaxAngle().Radian() - laser_shape->MinAngle().Radian();
+        double yaw_angle = (horz_samples == 1) ? 0 :
+          i * yaw_range / (horz_samples - 1) + laser_shape->MinAngle().Radian();
+
+        // auto offset = laser_shape->collisionParent->Relative Pose();
+        // since we're rotating a unit x vector, a pitch rotation will now be
+        // around the negative y axis
+        ignition::math::Quaterniond ray;
+        ignition::math::Vector3d start, end, axis;
+        // auto offset = laser_shape->GetPose();
+        auto offset = this->parent_ray_sensor_->Pose();
+        // auto offset = laser_shape->collisionParent->RelativePose();
+        ray.Euler(ignition::math::Vector3d(0.0, -custom_pitch_angles_[j], yaw_angle));
+        axis = offset.Rot() * ray * ignition::math::Vector3d::UnitX;
+
+        start = (axis * laser_shape->GetMinRange()) + offset.Pos();
+        end = (axis * laser_shape->GetMaxRange()) + offset.Pos();
+
+        // overwrite the default ray shape (uniform shape)
+        if (ray_index < laser_shape->RayCount())
+          laser_shape->SetRay(ray_index, start, end);
+        else laser_shape->AddRay(start, end);
+
+        ++ray_index;
+      }
+    }
+  }
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -329,7 +377,11 @@ void GazeboRosVelodyneLaser::OnScan(ConstLaserScanStampedPtr& _msg)
       }
 
       if (verticalRayCount > 1) {
-        pAngle = j * pDiff / (verticalRangeCount -1) + verticalMinAngle.Radian();
+        if (custom_pitch_angles_.size()) {
+          pAngle = custom_pitch_angles_[j];
+        } else {
+          pAngle = j * pDiff / (verticalRangeCount -1) + verticalMinAngle.Radian();
+        }
       } else {
         pAngle = verticalMinAngle.Radian();
       }
